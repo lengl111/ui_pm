@@ -13,6 +13,29 @@ The module never includes files from `lv_pc_a`, `ref/unigui`, or another
 application. `lv_pc_a` links this directory as an external module for the
 real-LVGL integration smoke and selected unigui View migration tests.
 
+## 与 MVP/MVU 的组合边界
+
+`ui_runtime` 是产品级页面机制，负责 Route、Entry/返回栈、页面生命周期、
+RootHost/ViewSlot 显隐、转场、Overlay、焦点和 View 回收。它不依赖 MVP 或
+MVU，也不理解页面业务。
+
+MVP/MVU 是 Route 内可选的 Feature 表现策略，负责 Snapshot 投影、Model 或
+ViewState、草稿、pending、错误、用户意图和 Command/Effect。简单单页可以
+直接使用 MVP/MVU + LVGL，不必引入 `ui_runtime`；需要产品级返回栈、全局弹窗、
+Fullscreen、统一生命周期或 View 回收时，再将 Feature 通过 PageAdapter 接入
+`ui_runtime`。
+
+组合模式下，一个页面只有一个 RootHost/ViewSlot 和一个显隐控制者：
+`ui_runtime`。MVP/MVU 的激活/失活只暂停或恢复 Feature 的订阅、动画和前台
+工作，不得再次 hide/show Slot 根对象。页面内容也只能有一个 render 所有者：
+直接 LVGL 页面使用 PageAdapter render/invalidate；现有 MVP/MVU 保留 active
+时的自动 render，并把 PageAdapter render 留空。MVU 中的 `screen` 只能表示
+页面内部 Panel/Mode/步骤，不能替代产品级 Route。
+
+不要把通用页面管理直接实现到 MVP 或 MVU 中。否则会造成两套页面栈和生命
+周期，或使通用页面机制错误依赖表现层。应用可以提供 Facade 简化调用，但
+Facade 只能组合 `ui_runtime` 与 Feature，不增加第二个页面状态机。
+
 Declare Runtime storage with `UI_RUNTIME_INITIALIZER` (or clear it to zero)
 before the first `ui_runtime_init()` call. Route and adapter descriptors must
 remain immutable for the Runtime lifetime. The configured `is_ui_thread`

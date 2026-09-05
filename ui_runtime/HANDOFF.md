@@ -58,6 +58,23 @@
 
 禁止让 `ui_runtime` include 应用页面、旧 `page_manager`、`popup_manager` 或平台业务 DTO。
 
+### 与 MVP/MVU 的最终组合定案
+
+`ui_runtime` 保持独立，不在 MVP 或 MVU 中重新实现。MVP/MVU 是 Route 内
+可选的 Feature 表现策略；直接 LVGL 页面同样是合法 PageAdapter。
+
+组合时，RootHost 是页面根对象显隐、转场和销毁的唯一所有者。MVP/MVU 的
+activate/deactivate 只恢复或暂停 Feature 前台工作，不得 hide/show Slot 根
+对象；产品级 Route、Back 和全局 Overlay 仍由 Runtime 执行。内容 render 也
+只有一个所有者：直接 LVGL 页面使用 PageAdapter render/invalidate；现有
+MVP/MVU 保留自动 render，PageAdapter render 留空。MVU 的 `screen` 只表示
+页面内部 Panel/Mode/步骤。
+
+当前这是一项目标架构定案。现有 MVP/MVU 自行 render 可以保留，但其 LVGL
+Adapter deactivate 仍可能调用 View hide；在 hosted View 适配及对应集成测试
+完成前，不得将会自动隐藏页面根容器的 Adapter 原样嵌入 `ui_runtime`。应用
+可以增加 Facade 简化调用，但 Facade 不得实现第二套页面状态机。
+
 ## 当前实现能力
 
 已经实现并验证：
@@ -211,4 +228,3 @@ Route 表只描述固定机制；每次导航的参数、页面 state 和 Overla
 - `tdd`：为首批 Route、生命周期、Back、Overlay 和低内存重建建立集成测试。
 - `diagnosing-bugs`：仅在目标板出现黑屏、悬空焦点、转场卡住或内存回归时使用。
 - `domain-modeling`：仅当新项目需要把页面/业务术语和所有权决策沉淀为 ADR 或 CONTEXT.md 时使用。
-

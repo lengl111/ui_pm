@@ -53,6 +53,66 @@ UiRuntime（每个 display 一个）
 7. 所有 LVGL 根对象删除都发生在安全 Tick，而不是 LVGL 事件或动画回调栈内。
 8. 物理按键去抖、线程消息、状态栏字段和业务资源压力都不进入 PageManager。
 
+### 1.1 与 MVP/MVU 的组合定案
+
+`ui_runtime` 与 MVP/MVU 是互补模块，不是两个竞争的页面管理器。最终采用
+“页面机制独立、表现策略可选、对外可以统一”的组合方式：
+
+```text
+应用 Facade（可选，只有统一调用入口，不含第二套状态机）
+├── ui_runtime（产品级页面机制，每个 display 一个）
+│   └── Entry / ViewSlot -> PageAdapter
+│                           ├── 直接 LVGL 页面
+│                           ├── MVP Feature
+│                           └── MVU Feature
+└── RTAO / HRT / Services（业务与系统数据）
+```
+
+必须遵守以下规则：
+
+1. `ui_runtime` 不依赖 MVP 或 MVU；PageAdapter 通过应用适配接缝选择其中
+   一种，或直接使用 LVGL。一个产品可以按 Route 混用三种方式。
+2. 一个产品页面只有一个页面宿主、一个根 ViewSlot 和一个显隐控制者，均由
+   `ui_runtime`/RootHost 负责。MVP/MVU 不得创建 LVGL screen、删除 Slot 根
+   对象或自行管理产品级返回栈。
+3. MVP/MVU 的职责限于 Feature 表现状态：Snapshot 投影、草稿、pending、
+   错误、用户意图、Command/Effect 和页面内部 Panel/Mode/步骤。
+4. Feature 的 activate/deactivate 在组合模式下只表示恢复/暂停订阅、动画
+   和前台工作，不得再次 hide/show ViewSlot 页面根对象。
+5. 页面内容 render 也必须只有一个所有者。直接 LVGL 页面使用 PageAdapter
+   的 `render + ui_entry_invalidate()`；现有 MVP/MVU 页面由自身在 active 时
+   render，PageAdapter 的 `render` 留空，避免重复投影。
+6. MVP/MVU 页面隐藏期间只更新 Feature 状态而不 render；重新激活或重建时
+   由 Feature 执行一次完整 render。页面内部内容子树可以按 Model 显隐。
+7. MVU 的 `screen` 只能是页面内部的 Panel/Mode/向导步骤。产品级 Route、
+   Back、Overlay、Fullscreen 和页面回收必须由 `ui_runtime` 管理。
+8. Feature 只能产生产品级导航意图；应用必须在当前 Presenter/Update/Effect
+   调用返回后执行 Runtime 导航，必要时投递到下一安全 Tick，不能从 Runtime
+   生命周期回调或同步 Feature 回调中重入导航。
+
+不采用“在 MVP/MVU 内直接实现一套通用 ui_runtime”的方式。若 MVP 和 MVU
+各自实现，会产生两套不一致的栈和生命周期；若在 MVP/MVU 包中再抽一个共同
+页面核心，逻辑上仍然是 `ui_runtime`，但会错误地让通用页面机制依赖表现层，
+并失去直接 LVGL 页面和无屏项目的独立复用能力。
+
+是否引入 `ui_runtime` 由页面机制需求决定，而不是由页面数量决定：
+
+| 产品场景 | 推荐组合 |
+|---|---|
+| 单页面或少量页面内部 Panel | MVP/MVU + LVGL，直接使用表现层即可 |
+| 需要产品级返回栈、Overlay、Fullscreen、统一生命周期或 View 回收 | `ui_runtime` + 每个 Route 选择直接 LVGL、MVP 或 MVU |
+| 无屏产品 | HRT/RTAO + Services，不引入 UI 模块 |
+
+这相当于 Android 中将 `NavController` 与 `ViewModel/Presenter` 分开：
+`ui_runtime` 管“页面在哪里、何时存在”，MVP/MVU 管“页面显示什么以及如何
+与业务服务交换”。
+
+本节是组合架构的冻结结论。当前 `ui_runtime` 已有通用 PageAdapter 接口，
+MVP/MVU 自行 render 可以直接保留；尚需提供 hosted View 适配，使 deactivate
+不隐藏 Runtime 的 ViewSlot 页面，并保证 PageAdapter 不配置重复 render。在
+该适配及集成测试完成前，不得将现有会自动隐藏根容器的 LVGL Adapter 原样
+嵌入 Route。
+
 ## 2. 模块职责
 
 | 模块 | 负责 | 明确不负责 |
